@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentBadge — Free badge for Agent ID holders</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 560px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; }
+  h1 { font-size: 1.6rem; }
+  button { padding: 0.6rem 1.2rem; font-size: 1rem; cursor: pointer; margin: 0.4rem 0.4rem 0.4rem 0; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  #status { margin-top: 1rem; padding: 0.8rem; background: #f4f4f4; border-radius: 8px; min-height: 1.2rem; }
+  .warn { color: #8a5a00; }
+  img.badge { width: 180px; height: 180px; }
+</style>
+</head>
+<body>
+<h1>AgentBadge</h1>
+<p>A free badge NFT for Binance Agent ID holders (name.ai) on BNB Chain. One badge per address, free to mint — you only pay gas.</p>
+<p class="warn">This page never asks for your seed phrase, private key, or a QR-code login. Connect only with your wallet's injected provider (e.g. Binance Wallet / MetaMask extension).</p>
+
+<button id="connectBtn">Connect wallet</button>
+<button id="mintBtn" disabled>Mint my free badge</button>
+<div id="status">Not connected.</div>
+<div id="badgeBox"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.5/dist/ethers.umd.min.js"></script>
+<script>
+// ===== CONFIG — fill in after deployment =====
+const AGENTBADGE_ADDRESS = "0x0000000000000000000000000000000000000000"; // TODO: deployed contract
+const AGENT_ID_ADDRESS   = "0x60b9262456de011f7d15a54cdd8c48baaa8b022f";   // Agent ID (SPACE ID) on BNB Chain
+const BSC_CHAIN_ID       = 56;
+
+const BADGE_ABI = [
+  "function mint() external returns (uint256)",
+  "function hasMinted(address) view returns (bool)",
+  "function badgeOf(address) view returns (uint256)",
+  "function totalMinted() view returns (uint256)",
+  "function tokenURI(uint256) view returns (string)"
+];
+const ERC721_ABI = ["function balanceOf(address) view returns (uint256)"];
+
+let provider, signer, account;
+
+const statusEl = document.getElementById("status");
+const mintBtn = document.getElementById("mintBtn");
+function setStatus(msg) { statusEl.textContent = msg; }
+
+document.getElementById("connectBtn").addEventListener("click", async () => {
+  try {
+    if (!window.ethereum) { setStatus("No injected wallet found. Install Binance Wallet or MetaMask and reload."); return; }
+    provider = new ethers.BrowserProvider(window.ethereum);
+    const network = await provider.getNetwork();
+    if (Number(network.chainId) !== BSC_CHAIN_ID) {
+      setStatus("Please switch your wallet to BNB Chain (chain id 56) and reconnect.");
+      return;
+    }
+    await provider.send("eth_requestAccounts", []);
+    signer = await provider.getSigner();
+    account = await signer.getAddress();
+    setStatus("Connected: " + account + ". Checking Agent ID…");
+
+    const agentId = new ethers.Contract(AGENT_ID_ADDRESS, ERC721_ABI, provider);
+    const holds = await agentId.balanceOf(account);
+    if (holds === 0n) {
+      setStatus("This wallet does not hold an Agent ID (name.ai). Minting is only for Agent ID holders.");
+      return;
+    }
+    if (AGENTBADGE_ADDRESS === "0x0000000000000000000000000000000000000000") {
+      setStatus("Connected as an Agent ID holder (" + holds.toString() + " ID). Contract not deployed yet — minting opens after deployment.");
+      return;
+    }
+    const badge = new ethers.Contract(AGENTBADGE_ADDRESS, BADGE_ABI, provider);
+    const already = await badge.hasMinted(account);
+    if (already) {
+      const id = await badge.badgeOf(account);
+      setStatus("You already own AgentBadge #" + id.toString() + ". One badge per address.");
+      document.getElementById("badgeBox").innerHTML = '<img class="badge" src="badge.svg" alt="AgentBadge">';
+      return;
+    }
+    const total = await badge.totalMinted();
+    setStatus("Agent ID confirmed. " + total.toString() + " badges minted so far. Ready to mint your free badge.");
+    mintBtn.disabled = false;
+  } catch (e) {
+    setStatus("Error: " + (e && e.message ? e.message : e));
+  }
+});
+
+mintBtn.addEventListener("click", async () => {
+  try {
+    mintBtn.disabled = true;
+    setStatus("Waiting for you to confirm the transaction in your wallet…");
+    const badge = new ethers.Contract(AGENTBADGE_ADDRESS, BADGE_ABI, signer);
+    const tx = await badge.mint(); // value 0 — free mint, gas only
+    setStatus("Transaction sent: " + tx.hash + " — waiting for confirmation…");
+    const receipt = await tx.wait();
+    const id = await badge.badgeOf(account);
+    setStatus("Minted! You own AgentBadge #" + id.toString() + " (block " + receipt.blockNumber + ").");
+    document.getElementById("badgeBox").innerHTML = '<img class="badge" src="badge.svg" alt="AgentBadge">';
+  } catch (e) {
+    setStatus("Mint failed or rejected: " + (e && e.message ? e.message : e));
+    mintBtn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
